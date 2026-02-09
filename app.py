@@ -1,7 +1,7 @@
-import cv2
 import streamlit as st
 import mediapipe as mp
 import numpy as np
+import cv2
 import time
 import threading
 import pyttsx3
@@ -28,11 +28,9 @@ exercise = st.selectbox(
     ["Squat", "Push-up", "Bicep Curl", "Plank", "Jumping Jack"]
 )
 
-run = st.checkbox("Start Camera")
 reset = st.button("Reset Session")
 
 FRAME_WINDOW = st.image([])
-cap = cv2.VideoCapture(0)
 
 counter = 0
 stage = None
@@ -59,11 +57,9 @@ def calculate_angle(a, b, c):
 def smart_speak(msg, force=False):
     global last_voice, rep_voice_gate
 
-    # avoid spam
     if msg == last_voice and not force:
         return
 
-    # only speak rep praise every 3 reps
     if "Good" in msg:
         rep_voice_gate += 1
         if rep_voice_gate % 3 != 0:
@@ -77,9 +73,17 @@ if reset:
     counter=0; start_time=time.time(); feedback="Session Reset!"
     smart_speak("Session reset", True)
 
-while run:
-    ret, frame = cap.read()
-    if not ret: break
+
+# ===============================
+# ✅ STREAMLIT CAMERA INPUT
+# ===============================
+
+camera = st.camera_input("Use your Camera")
+
+if camera is not None:
+
+    file_bytes = np.asarray(bytearray(camera.read()), dtype=np.uint8)
+    frame = cv2.imdecode(file_bytes, 1)
 
     frame=cv2.flip(frame,1)
     frame=cv2.resize(frame,(640,480))
@@ -94,7 +98,7 @@ while run:
 
         lm=results.pose_landmarks.landmark
 
-        # ========== SQUAT WITH FORM CHECK ==========
+        # ========== SQUAT ==========
         if exercise=="Squat":
             hip=[lm[23].x,lm[23].y]
             knee=[lm[25].x,lm[25].y]
@@ -102,12 +106,7 @@ while run:
 
             angle=calculate_angle(hip,knee,ankle)
 
-            # knee forward check
-            if knee[0] > ankle[0]+0.05:
-                feedback="Knees too forward!"
-                smart_speak(feedback,True)
-
-            elif angle>165:
+            if angle>165:
                 stage="UP"
 
             elif angle<95 and stage=="UP":
@@ -115,10 +114,6 @@ while run:
                 counter+=1
                 feedback="Good squat"
                 smart_speak(feedback)
-
-            elif angle>100 and angle<135:
-                feedback="Go lower"
-                smart_speak(feedback,True)
 
         # ========== PUSH UP ==========
         if exercise=="Push-up":
@@ -128,12 +123,7 @@ while run:
 
             angle=calculate_angle(shoulder,elbow,wrist)
 
-            # elbow flare check
-            if abs(shoulder[0]-elbow[0])>0.18:
-                feedback="Elbows too wide"
-                smart_speak(feedback,True)
-
-            elif angle>165:
+            if angle>165:
                 stage="UP"
 
             elif angle<65 and stage=="UP":
@@ -142,11 +132,7 @@ while run:
                 feedback="Good push-up"
                 smart_speak(feedback)
 
-            elif angle>80 and angle<120:
-                feedback="Chest lower"
-                smart_speak(feedback,True)
-
-        # ========== BICEP CURL (FIXED) ==========
+        # ========== BICEP CURL ==========
         if exercise=="Bicep Curl":
             shoulder=[lm[11].x,lm[11].y]
             elbow=[lm[13].x,lm[13].y]
@@ -154,12 +140,7 @@ while run:
 
             angle=calculate_angle(shoulder,elbow,wrist)
 
-            # prevent shoulder swing
-            if abs(shoulder[1]-elbow[1])>0.12:
-                feedback="Don’t swing shoulder"
-                smart_speak(feedback,True)
-
-            elif angle>155:
+            if angle>155:
                 stage="DOWN"
 
             elif angle<35 and stage=="DOWN":
@@ -168,11 +149,7 @@ while run:
                 feedback="Good curl"
                 smart_speak(feedback)
 
-            elif angle>45 and angle<120:
-                feedback="Full extension needed"
-                smart_speak(feedback,True)
-
-        # ========== JUMPING JACK (NEW LOGIC) ==========
+        # ========== JUMPING JACK ==========
         if exercise=="Jumping Jack":
             lw, rw = lm[15].y, lm[16].y
             la, ra = lm[27].x, lm[28].x
@@ -189,15 +166,11 @@ while run:
                 feedback="Good jump"
                 smart_speak(feedback)
 
-            else:
-                feedback="Arms up & legs wide"
-
         # ========== PLANK ==========
         if exercise=="Plank":
             counter=int(time.time()-start_time)
             feedback="Hold straight body"
 
-        # ----- calories -----
         calories=round(counter*CAL.get(exercise,0.2),2)
 
         cv2.putText(frame,f"{exercise}: {counter}",
@@ -207,5 +180,3 @@ while run:
             (20,80),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,165,255),2)
 
     FRAME_WINDOW.image(frame)
-
-cap.release()
