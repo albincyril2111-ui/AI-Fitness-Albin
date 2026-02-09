@@ -1,0 +1,19 @@
+# Ignore virtual environment
+venv/
+AI_Fitness_Clean/venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VS Code
+.vscode/
+
+# Database
+*.db
+
+# System
+.DS_Store
+Thumbs.db
