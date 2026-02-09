@@ -3,24 +3,14 @@ import mediapipe as mp
 import numpy as np
 import cv2
 import time
-import threading
-import pyttsx3
 
-# ---------- Smart Voice ----------
-def speak_async(text):
-    def run():
-        engine = pyttsx3.init()
-        engine.setProperty('rate', 155)
-        engine.say(text)
-        engine.runAndWait()
-    threading.Thread(target=run, daemon=True).start()
+st.set_page_config(page_title="AI Fitness Trainer", layout="centered")
 
-
-st.title("AI Fitness Trainer – Smart Coach")
+st.title("🏋️ AI Fitness Trainer – Cloud Version")
+st.write("Works on mobile & browser — no installation needed!")
 
 mp_pose = mp.solutions.pose
 mp_draw = mp.solutions.drawing_utils
-
 pose = mp_pose.Pose()
 
 exercise = st.selectbox(
@@ -30,15 +20,6 @@ exercise = st.selectbox(
 
 reset = st.button("Reset Session")
 
-FRAME_WINDOW = st.image([])
-
-counter = 0
-stage = None
-feedback = ""
-last_voice = ""
-rep_voice_gate = 0
-start_time = time.time()
-
 CAL = {
     "Squat": 0.32,
     "Push-up": 0.29,
@@ -47,136 +28,134 @@ CAL = {
     "Plank": 0.05
 }
 
-def calculate_angle(a, b, c):
-    a=np.array(a); b=np.array(b); c=np.array(c)
-    r=np.arctan2(c[1]-b[1],c[0]-b[0]) - np.arctan2(a[1]-b[1],a[0]-b[0])
-    angle=np.abs(r*180.0/np.pi)
-    if angle>180: angle=360-angle
-    return angle
-
-def smart_speak(msg, force=False):
-    global last_voice, rep_voice_gate
-
-    if msg == last_voice and not force:
-        return
-
-    if "Good" in msg:
-        rep_voice_gate += 1
-        if rep_voice_gate % 3 != 0:
-            return
-
-    speak_async(msg)
-    last_voice = msg
-
+if "counter" not in st.session_state:
+    st.session_state.counter = 0
+    st.session_state.stage = None
+    st.session_state.start = time.time()
 
 if reset:
-    counter=0; start_time=time.time(); feedback="Session Reset!"
-    smart_speak("Session reset", True)
+    st.session_state.counter = 0
+    st.session_state.stage = None
+    st.session_state.start = time.time()
+    st.success("Session Reset!")
+
+# ===== ANGLE FUNCTION =====
+def calculate_angle(a, b, c):
+    a = np.array(a)
+    b = np.array(b)
+    c = np.array(c)
+
+    radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
+    angle = np.abs(radians*180.0/np.pi)
+
+    if angle > 180:
+        angle = 360-angle
+    return angle
 
 
-# ===============================
-# ✅ STREAMLIT CAMERA INPUT
-# ===============================
+# ===== CAMERA INPUT (CLOUD SAFE) =====
+img_file = st.camera_input("Take a photo for analysis")
 
-camera = st.camera_input("Use your Camera")
+if img_file is not None:
 
-if camera is not None:
-
-    file_bytes = np.asarray(bytearray(camera.read()), dtype=np.uint8)
+    file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     frame = cv2.imdecode(file_bytes, 1)
 
-    frame=cv2.flip(frame,1)
-    frame=cv2.resize(frame,(640,480))
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = pose.process(rgb)
 
-    rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
-    results=pose.process(rgb)
+    feedback = "Get in position"
 
     if results.pose_landmarks:
-        mp_draw.draw_landmarks(frame,
-            results.pose_landmarks,
-            mp_pose.POSE_CONNECTIONS)
+        mp_draw.draw_landmarks(frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
-        lm=results.pose_landmarks.landmark
+        lm = results.pose_landmarks.landmark
 
-        # ========== SQUAT ==========
-        if exercise=="Squat":
-            hip=[lm[23].x,lm[23].y]
-            knee=[lm[25].x,lm[25].y]
-            ankle=[lm[27].x,lm[27].y]
+        # ===== SQUAT =====
+        if exercise == "Squat":
+            hip = [lm[23].x, lm[23].y]
+            knee = [lm[25].x, lm[25].y]
+            ankle = [lm[27].x, lm[27].y]
 
-            angle=calculate_angle(hip,knee,ankle)
+            angle = calculate_angle(hip, knee, ankle)
 
-            if angle>165:
-                stage="UP"
+            if angle > 160:
+                st.session_state.stage = "UP"
 
-            elif angle<95 and stage=="UP":
-                stage="DOWN"
-                counter+=1
-                feedback="Good squat"
-                smart_speak(feedback)
+            if angle < 95 and st.session_state.stage == "UP":
+                st.session_state.stage = "DOWN"
+                st.session_state.counter += 1
+                feedback = "✅ Good Squat!"
 
-        # ========== PUSH UP ==========
-        if exercise=="Push-up":
-            shoulder=[lm[11].x,lm[11].y]
-            elbow=[lm[13].x,lm[13].y]
-            wrist=[lm[15].x,lm[15].y]
+            elif angle > 100 and angle < 140:
+                feedback = "⬇ Go Lower"
 
-            angle=calculate_angle(shoulder,elbow,wrist)
+        # ===== PUSH UP =====
+        if exercise == "Push-up":
+            shoulder = [lm[11].x, lm[11].y]
+            elbow = [lm[13].x, lm[13].y]
+            wrist = [lm[15].x, lm[15].y]
 
-            if angle>165:
-                stage="UP"
+            angle = calculate_angle(shoulder, elbow, wrist)
 
-            elif angle<65 and stage=="UP":
-                stage="DOWN"
-                counter+=1
-                feedback="Good push-up"
-                smart_speak(feedback)
+            if angle > 165:
+                st.session_state.stage = "UP"
 
-        # ========== BICEP CURL ==========
-        if exercise=="Bicep Curl":
-            shoulder=[lm[11].x,lm[11].y]
-            elbow=[lm[13].x,lm[13].y]
-            wrist=[lm[15].x,lm[15].y]
+            if angle < 70 and st.session_state.stage == "UP":
+                st.session_state.stage = "DOWN"
+                st.session_state.counter += 1
+                feedback = "✅ Good Push-up!"
 
-            angle=calculate_angle(shoulder,elbow,wrist)
+            elif angle > 80 and angle < 120:
+                feedback = "⬇ Chest Lower"
 
-            if angle>155:
-                stage="DOWN"
+        # ===== BICEP CURL =====
+        if exercise == "Bicep Curl":
+            shoulder = [lm[11].x, lm[11].y]
+            elbow = [lm[13].x, lm[13].y]
+            wrist = [lm[15].x, lm[15].y]
 
-            elif angle<35 and stage=="DOWN":
-                stage="UP"
-                counter+=1
-                feedback="Good curl"
-                smart_speak(feedback)
+            angle = calculate_angle(shoulder, elbow, wrist)
 
-        # ========== JUMPING JACK ==========
-        if exercise=="Jumping Jack":
+            if angle > 155:
+                st.session_state.stage = "DOWN"
+
+            if angle < 35 and st.session_state.stage == "DOWN":
+                st.session_state.stage = "UP"
+                st.session_state.counter += 1
+                feedback = "✅ Good Curl!"
+
+        # ===== JUMPING JACK =====
+        if exercise == "Jumping Jack":
             lw, rw = lm[15].y, lm[16].y
             la, ra = lm[27].x, lm[28].x
 
             hands_up = lw < 0.35 and rw < 0.35
-            legs_apart = abs(la-ra) > 0.25
+            legs_apart = abs(la - ra) > 0.25
 
             if hands_up and legs_apart:
-                stage="OPEN"
+                st.session_state.stage = "OPEN"
 
-            if (not hands_up) and (not legs_apart) and stage=="OPEN":
-                stage="CLOSE"
-                counter+=1
-                feedback="Good jump"
-                smart_speak(feedback)
+            if (not hands_up) and (not legs_apart) and st.session_state.stage == "OPEN":
+                st.session_state.stage = "CLOSE"
+                st.session_state.counter += 1
+                feedback = "✅ Good Jump!"
 
-        # ========== PLANK ==========
-        if exercise=="Plank":
-            counter=int(time.time()-start_time)
-            feedback="Hold straight body"
+        # ===== PLANK =====
+        if exercise == "Plank":
+            st.session_state.counter = int(time.time() - st.session_state.start)
+            feedback = "Hold Straight Body"
 
-        calories=round(counter*CAL.get(exercise,0.2),2)
+        calories = round(st.session_state.counter * CAL.get(exercise, 0.2), 2)
 
-        cv2.putText(frame,f"{exercise}: {counter}",
-            (20,40),cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),2)
+        st.image(frame, channels="BGR")
 
-        cv2.putText(frame,feedback,
-            (20,80),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,165,255),2)
+        st.subheader(f"🏆 Reps: {st.session_state.counter}")
+        st.subheader(f"🔥 Calories: {calories}")
+        st.info(feedback)
 
-    FRAME_WINDOW.image(frame)
+    else:
+        st.warning("No body detected — adjust camera")
+
+else:
+    st.info("Open camera and take a photo to start")
