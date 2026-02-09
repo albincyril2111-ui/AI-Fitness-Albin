@@ -1,15 +1,25 @@
 import streamlit as st
-import cv2
-import numpy as np
-import mediapipe as mp
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+import mediapipe as mp
+import numpy as np
+import av
+import time
 
-st.title("AI Fitness Trainer – Cloud Safe")
+st.title("AI Fitness Trainer – Cloud Version")
 
 mp_pose = mp.solutions.pose
 mp_draw = mp.solutions.drawing_utils
 
 pose = mp_pose.Pose()
+
+exercise = st.selectbox(
+    "Select Exercise",
+    ["Squat", "Push-up", "Bicep Curl", "Plank", "Jumping Jack"]
+)
+
+counter = 0
+stage = None
+start_time = time.time()
 
 CAL = {
     "Squat": 0.32,
@@ -19,27 +29,21 @@ CAL = {
     "Plank": 0.05
 }
 
-exercise = st.selectbox(
-    "Select Exercise",
-    list(CAL.keys())
-)
-
-def calculate_angle(a,b,c):
+def calculate_angle(a, b, c):
     a=np.array(a); b=np.array(b); c=np.array(c)
     r=np.arctan2(c[1]-b[1],c[0]-b[0]) - np.arctan2(a[1]-b[1],a[0]-b[0])
-    angle=np.abs(r*180/np.pi)
+    angle=np.abs(r*180.0/np.pi)
     if angle>180: angle=360-angle
     return angle
 
 
-class AIProcessor(VideoProcessorBase):
-
-    counter = 0
-    stage = None
+class AITrainer(VideoProcessorBase):
 
     def recv(self, frame):
+        global counter, stage
+
         img = frame.to_ndarray(format="bgr24")
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        rgb = img[:, :, ::-1]
 
         results = pose.process(rgb)
 
@@ -60,19 +64,29 @@ class AIProcessor(VideoProcessorBase):
                 angle=calculate_angle(hip,knee,ankle)
 
                 if angle>165:
-                    self.stage="UP"
+                    stage="UP"
 
-                if angle<95 and self.stage=="UP":
-                    self.stage="DOWN"
-                    self.counter+=1
+                elif angle<95 and stage=="UP":
+                    stage="DOWN"
+                    counter+=1
 
-            cv2.putText(img,f"Reps: {self.counter}",
-                (20,40),cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),2)
+            if exercise=="Plank":
+                counter=int(time.time()-start_time)
 
-        return frame.from_ndarray(img, format="bgr24")
+            cv2.putText(
+                img,
+                f"{exercise}: {counter}",
+                (20,40),
+                0,1,(0,255,0),2
+            )
+
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 
 webrtc_streamer(
     key="fitness",
-    video_processor_factory=AIProcessor
+    video_processor_factory=AITrainer
 )
+
+st.write("Reps / Seconds:", counter)
+st.write("Calories:", round(counter*CAL.get(exercise,0.2),2))
