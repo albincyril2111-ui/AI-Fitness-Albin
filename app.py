@@ -1,10 +1,15 @@
 import streamlit as st
+import mediapipe as mp
 import numpy as np
+import cv2
 import time
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
-import av
 
 st.title("AI Fitness Trainer – Cloud Version")
+
+mp_pose = mp.solutions.pose
+mp_draw = mp.solutions.drawing_utils
+
+pose = mp_pose.Pose()
 
 exercise = st.selectbox(
     "Select Exercise",
@@ -25,43 +30,132 @@ CAL = {
 }
 
 def calculate_angle(a, b, c):
-    a=np.array(a); b=np.array(b); c=np.array(c)
-    r=np.arctan2(c[1]-b[1],c[0]-b[0]) - np.arctan2(a[1]-b[1],a[0]-b[0])
-    angle=np.abs(r*180.0/np.pi)
-    if angle>180: angle=360-angle
+    a = np.array(a)
+    b = np.array(b)
+    c = np.array(c)
+
+    r = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
+    angle = np.abs(r*180.0/np.pi)
+
+    if angle > 180:
+        angle = 360 - angle
     return angle
 
 
-class VideoProcessor(VideoProcessorBase):
+st.subheader("Press START and allow camera permission")
 
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
+img_file = st.camera_input("Capture Frame")
 
-        # HERE – later we connect browser AI model
-        # For now basic counter simulation so app works
+if img_file is not None:
+    bytes_data = img_file.getvalue()
+    frame = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
 
-        global counter, feedback
+    frame = cv2.resize(frame, (640, 480))
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
+    results = pose.process(rgb)
+
+    if results.pose_landmarks:
+        mp_draw.draw_landmarks(
+            frame,
+            results.pose_landmarks,
+            mp_pose.POSE_CONNECTIONS
+        )
+
+        lm = results.pose_landmarks.landmark
+
+        # ----------- SQUAT -----------
+        if exercise == "Squat":
+            hip = [lm[23].x, lm[23].y]
+            knee = [lm[25].x, lm[25].y]
+            ankle = [lm[27].x, lm[27].y]
+
+            angle = calculate_angle(hip, knee, ankle)
+
+            if angle > 165:
+                stage = "UP"
+
+            if angle < 95 and stage == "UP":
+                stage = "DOWN"
+                counter += 1
+                feedback = "Good squat!"
+
+            elif angle > 100 and angle < 135:
+                feedback = "Go lower"
+
+
+        # ----------- PUSH UP -----------
+        if exercise == "Push-up":
+            shoulder = [lm[11].x, lm[11].y]
+            elbow = [lm[13].x, lm[13].y]
+            wrist = [lm[15].x, lm[15].y]
+
+            angle = calculate_angle(shoulder, elbow, wrist)
+
+            if angle > 165:
+                stage = "UP"
+
+            if angle < 65 and stage == "UP":
+                stage = "DOWN"
+                counter += 1
+                feedback = "Good push-up!"
+
+            elif angle > 80 and angle < 120:
+                feedback = "Chest lower"
+
+
+        # ----------- BICEP CURL -----------
+        if exercise == "Bicep Curl":
+            shoulder = [lm[11].x, lm[11].y]
+            elbow = [lm[13].x, lm[13].y]
+            wrist = [lm[15].x, lm[15].y]
+
+            angle = calculate_angle(shoulder, elbow, wrist)
+
+            if angle > 155:
+                stage = "DOWN"
+
+            if angle < 35 and stage == "DOWN":
+                stage = "UP"
+                counter += 1
+                feedback = "Good curl!"
+
+            elif angle > 45 and angle < 120:
+                feedback = "Extend fully"
+
+
+        # ----------- JUMPING JACK -----------
+        if exercise == "Jumping Jack":
+            lw, rw = lm[15].y, lm[16].y
+            la, ra = lm[27].x, lm[28].x
+
+            hands_up = lw < 0.35 and rw < 0.35
+            legs_apart = abs(la-ra) > 0.25
+
+            if hands_up and legs_apart:
+                stage = "OPEN"
+
+            if (not hands_up) and (not legs_apart) and stage == "OPEN":
+                stage = "CLOSE"
+                counter += 1
+                feedback = "Good jump!"
+
+
+        # ----------- PLANK -----------
         if exercise == "Plank":
             counter = int(time.time() - start_time)
-            feedback = "Hold straight body"
-
-        calories = round(counter * CAL.get(exercise,0.2),2)
-
-        # Display overlay
-        import cv2
-        cv2.putText(img,f"{exercise}: {counter}",
-            (20,40),cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),2)
-
-        cv2.putText(img,feedback,
-            (20,80),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,165,255),2)
-
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
+            feedback = "Hold tight!"
 
 
-st.write("Press START and allow camera permission")
+        calories = round(counter * CAL.get(exercise, 0.2), 2)
 
-webrtc_streamer(key="fitness", video_processor_factory=VideoProcessor)
+        cv2.putText(frame, f"Reps: {counter}",
+            (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
 
-st.write("🔥 Calories burned estimate:")
-st.write(round(counter * CAL.get(exercise,0.2),2))
+        cv2.putText(frame, feedback,
+            (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,165,255), 2)
+
+        st.image(frame)
+
+        st.write("### Calories burned estimate:")
+        st.write(calories)
