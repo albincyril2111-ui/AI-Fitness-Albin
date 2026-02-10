@@ -1,161 +1,60 @@
 import streamlit as st
-import mediapipe as mp
-import numpy as np
 import cv2
+import numpy as np
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import time
 
-st.title("AI Fitness Trainer – Cloud Version")
-
-mp_pose = mp.solutions.pose
-mp_draw = mp.solutions.drawing_utils
-
-pose = mp_pose.Pose()
+st.title("AI Fitness Trainer – Cloud Safe Version")
 
 exercise = st.selectbox(
     "Select Exercise",
-    ["Squat", "Push-up", "Bicep Curl", "Plank", "Jumping Jack"]
+    ["Squat", "Push-up", "Bicep Curl"]
 )
-
-counter = 0
-stage = None
-feedback = ""
-start_time = time.time()
 
 CAL = {
     "Squat": 0.32,
     "Push-up": 0.29,
-    "Bicep Curl": 0.18,
-    "Jumping Jack": 0.20,
-    "Plank": 0.05
+    "Bicep Curl": 0.18
 }
 
-def calculate_angle(a, b, c):
-    a = np.array(a)
-    b = np.array(b)
-    c = np.array(c)
+class Trainer(VideoTransformerBase):
+    def __init__(self):
+        self.counter = 0
+        self.stage = "UP"
 
-    r = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
-    angle = np.abs(r*180.0/np.pi)
+    def transform(self, frame):
+        img = frame.to_ndarray(format="bgr24")
 
-    if angle > 180:
-        angle = 360 - angle
-    return angle
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5,5), 0)
 
+        movement = np.mean(blur)
 
-st.subheader("Press START and allow camera permission")
+        # SIMPLE REP LOGIC (Cloud Compatible)
+        if movement > 60 and self.stage == "UP":
+            self.stage = "DOWN"
 
-img_file = st.camera_input("Capture Frame")
+        if movement < 40 and self.stage == "DOWN":
+            self.stage = "UP"
+            self.counter += 1
 
-if img_file is not None:
-    bytes_data = img_file.getvalue()
-    frame = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+        cv2.putText(img, f"Reps: {self.counter}",
+            (20,40), cv2.FONT_HERSHEY_SIMPLEX,
+            1,(0,255,0),2)
 
-    frame = cv2.resize(frame, (640, 480))
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        calories = round(self.counter * CAL[exercise],2)
 
-    results = pose.process(rgb)
+        cv2.putText(img, f"Calories: {calories}",
+            (20,80), cv2.FONT_HERSHEY_SIMPLEX,
+            1,(0,255,255),2)
 
-    if results.pose_landmarks:
-        mp_draw.draw_landmarks(
-            frame,
-            results.pose_landmarks,
-            mp_pose.POSE_CONNECTIONS
-        )
-
-        lm = results.pose_landmarks.landmark
-
-        # ----------- SQUAT -----------
-        if exercise == "Squat":
-            hip = [lm[23].x, lm[23].y]
-            knee = [lm[25].x, lm[25].y]
-            ankle = [lm[27].x, lm[27].y]
-
-            angle = calculate_angle(hip, knee, ankle)
-
-            if angle > 165:
-                stage = "UP"
-
-            if angle < 95 and stage == "UP":
-                stage = "DOWN"
-                counter += 1
-                feedback = "Good squat!"
-
-            elif angle > 100 and angle < 135:
-                feedback = "Go lower"
+        return img
 
 
-        # ----------- PUSH UP -----------
-        if exercise == "Push-up":
-            shoulder = [lm[11].x, lm[11].y]
-            elbow = [lm[13].x, lm[13].y]
-            wrist = [lm[15].x, lm[15].y]
+webrtc_streamer(
+    key="fitness",
+    video_transformer_factory=Trainer,
+    media_stream_constraints={"video": True, "audio": False},
+)
 
-            angle = calculate_angle(shoulder, elbow, wrist)
-
-            if angle > 165:
-                stage = "UP"
-
-            if angle < 65 and stage == "UP":
-                stage = "DOWN"
-                counter += 1
-                feedback = "Good push-up!"
-
-            elif angle > 80 and angle < 120:
-                feedback = "Chest lower"
-
-
-        # ----------- BICEP CURL -----------
-        if exercise == "Bicep Curl":
-            shoulder = [lm[11].x, lm[11].y]
-            elbow = [lm[13].x, lm[13].y]
-            wrist = [lm[15].x, lm[15].y]
-
-            angle = calculate_angle(shoulder, elbow, wrist)
-
-            if angle > 155:
-                stage = "DOWN"
-
-            if angle < 35 and stage == "DOWN":
-                stage = "UP"
-                counter += 1
-                feedback = "Good curl!"
-
-            elif angle > 45 and angle < 120:
-                feedback = "Extend fully"
-
-
-        # ----------- JUMPING JACK -----------
-        if exercise == "Jumping Jack":
-            lw, rw = lm[15].y, lm[16].y
-            la, ra = lm[27].x, lm[28].x
-
-            hands_up = lw < 0.35 and rw < 0.35
-            legs_apart = abs(la-ra) > 0.25
-
-            if hands_up and legs_apart:
-                stage = "OPEN"
-
-            if (not hands_up) and (not legs_apart) and stage == "OPEN":
-                stage = "CLOSE"
-                counter += 1
-                feedback = "Good jump!"
-
-
-        # ----------- PLANK -----------
-        if exercise == "Plank":
-            counter = int(time.time() - start_time)
-            feedback = "Hold tight!"
-
-
-        calories = round(counter * CAL.get(exercise, 0.2), 2)
-
-        cv2.putText(frame, f"Reps: {counter}",
-            (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
-
-        cv2.putText(frame, feedback,
-            (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,165,255), 2)
-
-        st.image(frame)
-
-        st.write("### Calories burned estimate:")
-        st.write(calories)
+st.info("Allow camera permission in browser ↑")
