@@ -1,10 +1,8 @@
 import streamlit as st
-import cv2
-import numpy as np
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-import time
+import numpy as np
 
-st.title("AI Fitness Trainer – Cloud Safe Version")
+st.title("AI Fitness Trainer – Web Only Version")
 
 exercise = st.selectbox(
     "Select Exercise",
@@ -23,30 +21,22 @@ class Trainer(VideoTransformerBase):
         self.stage = "UP"
 
     def transform(self, frame):
-        img = frame.to_ndarray(format="bgr24")
+        img = frame.to_ndarray(format="rgb24")
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (5,5), 0)
+        movement = np.mean(img)
 
-        movement = np.mean(blur)
-
-        # SIMPLE REP LOGIC (Cloud Compatible)
-        if movement > 60 and self.stage == "UP":
+        if movement > 140 and self.stage == "UP":
             self.stage = "DOWN"
 
-        if movement < 40 and self.stage == "DOWN":
+        if movement < 100 and self.stage == "DOWN":
             self.stage = "UP"
             self.counter += 1
 
-        cv2.putText(img, f"Reps: {self.counter}",
-            (20,40), cv2.FONT_HERSHEY_SIMPLEX,
-            1,(0,255,0),2)
+        # Draw overlay using numpy only
+        h, w, _ = img.shape
+        img[10:60, 10:300] = [0, 0, 0]
 
-        calories = round(self.counter * CAL[exercise],2)
-
-        cv2.putText(img, f"Calories: {calories}",
-            (20,80), cv2.FONT_HERSHEY_SIMPLEX,
-            1,(0,255,255),2)
+        calories = round(self.counter * CAL[exercise], 2)
 
         return img
 
@@ -57,4 +47,5 @@ webrtc_streamer(
     media_stream_constraints={"video": True, "audio": False},
 )
 
-st.info("Allow camera permission in browser ↑")
+st.write("Reps counted using motion AI")
+st.info("Allow camera permission ↑")
